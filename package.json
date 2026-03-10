@@ -8,10 +8,10 @@
     "Tzahi Efrati (https://linkedin.com/in/efrati)"
   ],
   "scripts": {
-    "qa:capture": "node skills/design-qa/scripts/capture.js",
-    "qa:align": "node skills/design-qa/scripts/alignment-check.js",
-    "qa:inspect": "node skills/design-qa/scripts/inspect-dom.js",
-    "qa:a11y": "node skills/design-qa/scripts/audit-a11y.js"
+    "qa:capture": "node plugins/design-qa/skills/design-qa/scripts/capture.js",
+    "qa:align": "node plugins/design-qa/skills/design-qa/scripts/alignment-check.js",
+    "qa:inspect": "node plugins/design-qa/skills/design-qa/scripts/inspect-dom.js",
+    "qa:a11y": "node plugins/design-qa/skills/design-qa/scripts/audit-a11y.js"
   },
   "devDependencies": {
     "axe-core": "^4.11.1",
