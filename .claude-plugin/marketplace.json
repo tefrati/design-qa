@@ -1,0 +1,8 @@
+{
+  "plugins": [
+    {
+      "name": "design-qa",
+      "path": "."
+    }
+  ]
+}
