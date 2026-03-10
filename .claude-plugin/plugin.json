@@ -2,7 +2,13 @@
   "name": "design-qa",
   "description": "Autonomous design critic for Claude Code. Iterates screenshot → pixel-measure → fix until your UI passes Dieter Rams, Jakob Nielsen, and Steve Jobs standards.",
   "author": {
-    "name": "Tzahi Efrati",
-    "url": "https://linkedin.com/in/efrati"
-  }
+    "name": "Paul Slattery",
+    "url": "https://github.com/p-slatts"
+  },
+  "contributors": [
+    {
+      "name": "Tzahi Efrati",
+      "url": "https://linkedin.com/in/efrati"
+    }
+  ]
 }
