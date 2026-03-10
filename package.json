@@ -1,0 +1,17 @@
+{
+  "name": "design-qa",
+  "version": "1.0.0",
+  "description": "A Claude Code plugin for autonomous design QA — captures screenshots, measures alignment, inspects DOM structure, and audits accessibility.",
+  "license": "MIT",
+  "author": "Paul Slattery",
+  "scripts": {
+    "qa:capture": "node skills/design-qa/scripts/capture.js",
+    "qa:align": "node skills/design-qa/scripts/alignment-check.js",
+    "qa:inspect": "node skills/design-qa/scripts/inspect-dom.js",
+    "qa:a11y": "node skills/design-qa/scripts/audit-a11y.js"
+  },
+  "devDependencies": {
+    "axe-core": "^4.11.1",
+    "playwright": "^1.40.0"
+  }
+}

@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
  * Design QA Screenshot Capture Script
- * 
+ *
  * Captures screenshots for visual inspection during the design QA loop.
  * Uses Playwright for reliable, headless browser screenshots.
- * 
+ *
  * Usage:
  *   node capture.js --url="http://localhost:3000" --output="screenshot.png"
  *   node capture.js --url="http://localhost:3000" --output="mobile.png" --mobile
  *   node capture.js --url="http://localhost:3000" --output="custom.png" --width=1920 --height=1080
- * 
+ *
  * Options:
  *   --url       Target URL to capture (required)
  *   --output    Output file path (default: screenshot.png)
@@ -19,16 +19,20 @@
  *   --full      Capture full page (not just viewport)
  *   --wait      Wait time in ms after load (default: 1000)
  *   --selector  Wait for specific selector before capture
+ *   --scale     Device scale factor (default: 2). A value of 2 produces a
+ *               Retina-resolution image (2880x1800 for the default 1440x900
+ *               viewport). Note: this high-res image may be downscaled when
+ *               displayed in a chat interface — use --scale=1 if you need
+ *               1:1 pixel output.
  */
 
 const { chromium } = require('playwright');
 const path = require('path');
 const fs = require('fs');
+const { parseArgs, validateUrl, validateOutput } = require('./lib/parse-args');
 
 async function capture() {
-  // Parse arguments
-  const args = process.argv.slice(2);
-  const options = {
+  const options = parseArgs({
     url: null,
     output: 'screenshot.png',
     width: 1440,
@@ -36,39 +40,20 @@ async function capture() {
     mobile: false,
     full: false,
     wait: 1000,
-    selector: null
-  };
+    selector: null,
+    scale: 2
+  }, { scriptName: 'capture.js' });
 
-  for (const arg of args) {
-    if (arg.startsWith('--url=')) {
-      options.url = arg.split('=')[1];
-    } else if (arg.startsWith('--output=')) {
-      options.output = arg.split('=')[1];
-    } else if (arg.startsWith('--width=')) {
-      options.width = parseInt(arg.split('=')[1]);
-    } else if (arg.startsWith('--height=')) {
-      options.height = parseInt(arg.split('=')[1]);
-    } else if (arg === '--mobile') {
-      options.mobile = true;
-      options.width = 390;
-      options.height = 844;
-    } else if (arg === '--full') {
-      options.full = true;
-    } else if (arg.startsWith('--wait=')) {
-      options.wait = parseInt(arg.split('=')[1]);
-    } else if (arg.startsWith('--selector=')) {
-      options.selector = arg.split('=')[1];
-    }
-  }
+  validateUrl(options.url, 'capture.js');
+  const resolvedOutput = validateOutput(options.output) || options.output;
 
-  if (!options.url) {
-    console.error('Error: --url is required');
-    console.error('Usage: node capture.js --url="http://localhost:3000" --output="screenshot.png"');
-    process.exit(1);
+  if (options.mobile) {
+    options.width = 390;
+    options.height = 844;
   }
 
   // Ensure output directory exists
-  const outputDir = path.dirname(options.output);
+  const outputDir = path.dirname(resolvedOutput);
   if (outputDir && outputDir !== '.') {
     fs.mkdirSync(outputDir, { recursive: true });
   }
@@ -76,7 +61,8 @@ async function capture() {
   console.log(`📸 Capturing screenshot...`);
   console.log(`   URL: ${options.url}`);
   console.log(`   Viewport: ${options.width}x${options.height}`);
-  console.log(`   Output: ${options.output}`);
+  console.log(`   Scale: ${options.scale}x`);
+  console.log(`   Output: ${resolvedOutput}`);
 
   const browser = await chromium.launch({
     headless: true
@@ -88,7 +74,12 @@ async function capture() {
         width: options.width,
         height: options.height
       },
-      deviceScaleFactor: 2, // Retina quality
+      // deviceScaleFactor controls the DPR of the emulated device. A value of
+      // 2 produces Retina-quality images at 2x the viewport dimensions. These
+      // images are sharper for design review but will appear downscaled (often
+      // 50-70% of true size) when rendered inline in a chat interface. Use
+      // --scale=1 for 1:1 pixel output when exact pixel matching is needed.
+      deviceScaleFactor: options.scale,
       isMobile: options.mobile
     });
 
@@ -111,12 +102,12 @@ async function capture() {
 
     // Take screenshot
     await page.screenshot({
-      path: options.output,
+      path: resolvedOutput,
       fullPage: options.full,
       type: 'png'
     });
 
-    console.log(`✅ Screenshot saved: ${options.output}`);
+    console.log(`✅ Screenshot saved: ${resolvedOutput}`);
 
     // Output metadata for analysis
     const title = await page.title();

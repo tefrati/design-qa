@@ -23,38 +23,21 @@
  */
 
 const { chromium } = require('playwright');
+const path = require('path');
 const fs = require('fs');
+const { parseArgs, validateUrl, validateOutput } = require('./lib/parse-args');
 
 async function checkAlignment() {
-  // Parse arguments
-  const args = process.argv.slice(2);
-  const options = {
+  const options = parseArgs({
     url: null,
     tolerance: 2,
     output: null,
     width: 1440,
     height: 900
-  };
+  }, { scriptName: 'alignment-check.js' });
 
-  for (const arg of args) {
-    if (arg.startsWith('--url=')) {
-      options.url = arg.split('=')[1];
-    } else if (arg.startsWith('--tolerance=')) {
-      options.tolerance = parseInt(arg.split('=')[1]);
-    } else if (arg.startsWith('--output=')) {
-      options.output = arg.split('=')[1];
-    } else if (arg.startsWith('--width=')) {
-      options.width = parseInt(arg.split('=')[1]);
-    } else if (arg.startsWith('--height=')) {
-      options.height = parseInt(arg.split('=')[1]);
-    }
-  }
-
-  if (!options.url) {
-    console.error('Error: --url is required');
-    console.error('Usage: node alignment-check.js --url="http://localhost:3000"');
-    process.exit(1);
-  }
+  validateUrl(options.url, 'alignment-check.js');
+  const resolvedOutput = validateOutput(options.output);
 
   console.log(`📏 PIXEL-LEVEL ALIGNMENT CHECK`);
   console.log(`   URL: ${options.url}`);
@@ -74,6 +57,7 @@ async function checkAlignment() {
     const results = await page.evaluate((tolerance) => {
       const issues = [];
       const measurements = {};
+      const matchedSelectors = {};
 
       // Helper: Get element rect with computed styles
       const getElementInfo = (selector, name) => {
@@ -98,46 +82,50 @@ async function checkAlignment() {
         };
       };
 
-      // Helper: Get first visible text element in container
-      const getFirstTextElement = (containerSelector) => {
-        const container = document.querySelector(containerSelector);
-        if (!container) return null;
-        const textEls = container.querySelectorAll('a, span, p, h1, h2, h3, h4, h5, h6, li');
-        for (const el of textEls) {
-          const rect = el.getBoundingClientRect();
-          const computed = getComputedStyle(el);
-          if (rect.width > 0 && computed.display !== 'none' && el.textContent.trim()) {
-            return {
-              element: el.tagName.toLowerCase(),
-              text: el.textContent.trim().substring(0, 30),
-              left: rect.left,
-              top: rect.top
-            };
-          }
-        }
-        return null;
-      };
-
       // ========== ALIGNMENT CHECKS ==========
 
       // 1. HEADER / NAV ALIGNMENT
-      // Check that header elements align with content below
+      // MkDocs-specific selectors first, then generic semantic fallbacks
       const commonSelectors = {
-        header: ['.md-header__inner', 'header', '.header', '[role="banner"]'],
-        nav: ['.md-tabs__inner', '.md-tabs', 'nav.tabs', '.nav-tabs', '.navigation-tabs'],
-        navFirstItem: ['.md-tabs__item:first-child .md-tabs__link', '.md-tabs__item:first-child', '.nav-tabs a:first-child'],
-        sidebar: ['.md-sidebar--primary', '.sidebar', 'aside', '[role="navigation"]'],
-        sidebarFirstLink: ['.md-nav--primary .md-nav__link', '.md-sidebar--primary a', '.sidebar a:first-child'],
-        content: ['.md-content', 'main', '.content', '[role="main"]'],
-        contentInner: ['.md-content__inner', '.content-inner', 'article']
+        header: [
+          '.md-header__inner',
+          'header', '.header', '[role="banner"]'
+        ],
+        nav: [
+          '.md-tabs__inner', '.md-tabs',
+          'nav.tabs', '.nav-tabs', '.navigation-tabs',
+          'nav', '[role="navigation"]'
+        ],
+        navFirstItem: [
+          '.md-tabs__item:first-child .md-tabs__link', '.md-tabs__item:first-child',
+          '.nav-tabs a:first-child',
+          'nav a:first-child', '[role="navigation"] a:first-child'
+        ],
+        sidebar: [
+          '.md-sidebar--primary',
+          'aside', '.sidebar', '[role="complementary"]', '[role="navigation"]:not(header [role="navigation"])'
+        ],
+        sidebarFirstLink: [
+          '.md-nav--primary .md-nav__link', '.md-sidebar--primary a',
+          'aside a:first-of-type', '.sidebar a:first-of-type'
+        ],
+        content: [
+          '.md-content',
+          'main', '.content', '[role="main"]'
+        ],
+        contentInner: [
+          '.md-content__inner',
+          'article', '.content-inner', 'main > div:first-child'
+        ]
       };
 
-      // Find elements using fallback selectors
+      // Find elements using fallback selectors, log which matched
       const findElement = (selectorList, name) => {
         for (const selector of selectorList) {
           const info = getElementInfo(selector, name);
           if (info && info.visible) {
             measurements[name] = info;
+            matchedSelectors[name] = selector;
             return info;
           }
         }
@@ -185,7 +173,10 @@ async function checkAlignment() {
       }
 
       // 2. GRID ALIGNMENT CHECK
-      // Check if major sections align to common left edges
+      // Check if major sections align to common left edges.
+      // Only flag when there are >3 distinct left-edge clusters AND the spread
+      // between the min and max dominant edge exceeds 16px. This avoids false
+      // positives on intentionally asymmetric layouts.
       const leftEdges = [];
       document.querySelectorAll('h1, h2, h3, p, ul, ol, table, .card, section > div').forEach(el => {
         const rect = el.getBoundingClientRect();
@@ -213,15 +204,16 @@ async function checkAlignment() {
           edgeDistribution: sortedEdges.map(([edge, count]) => ({ edge: parseInt(edge), count }))
         };
 
-        // Check for scattered alignment (no dominant edge)
-        const totalElements = leftEdges.length;
-        const primaryEdgeCount = sortedEdges[0][1];
-        if (primaryEdgeCount < totalElements * 0.4 && totalElements > 10) {
+        const distinctClusters = sortedEdges.length;
+        const edgeValues = sortedEdges.map(([edge]) => parseInt(edge));
+        const edgeSpread = Math.max(...edgeValues) - Math.min(...edgeValues);
+
+        if (distinctClusters > 3 && edgeSpread > 16) {
           issues.push({
             severity: 'MINOR',
             type: 'GRID',
             description: `Inconsistent grid alignment`,
-            detail: `Only ${((primaryEdgeCount / totalElements) * 100).toFixed(0)}% of elements align to primary edge`,
+            detail: `${distinctClusters} distinct left-edge clusters with ${edgeSpread}px spread (clusters: ${edgeValues.join('px, ')}px)`,
             fix: `Standardise content left margin/padding for consistent alignment`
           });
         }
@@ -301,9 +293,10 @@ async function checkAlignment() {
 
       // 5. ELEMENT VISIBILITY IN CONTEXT
       // Check for elements that are visible but probably shouldn't be
-      const sidebarEl = document.querySelector('.md-sidebar--primary');
+      // Try MkDocs-specific selector first, then generic aside/sidebar
+      const sidebarEl = document.querySelector('.md-sidebar--primary') || document.querySelector('aside');
       if (sidebarEl) {
-        const sidebarLinks = sidebarEl.querySelectorAll('.md-nav__link');
+        const sidebarLinks = sidebarEl.querySelectorAll('.md-nav__link, a');
         const visibleLinks = [...sidebarLinks].filter(link => {
           const rect = link.getBoundingClientRect();
           return rect.width > 0 && rect.height > 0;
@@ -325,7 +318,36 @@ async function checkAlignment() {
         }
       }
 
-      return { issues, measurements };
+      // ========== LAYER THRESHOLD SUMMARY ==========
+      // Map findings to the five analysis layers and print PASS/FAIL.
+      const critical = issues.filter(i => i.severity === 'CRITICAL');
+      const major = issues.filter(i => i.severity === 'MAJOR');
+      const minor = issues.filter(i => i.severity === 'MINOR');
+
+      // Accessibility: 100% required — any CRITICAL fails this
+      const accessibilityPass = critical.length === 0;
+
+      // Structure (alignment, grid, spacing): 90% required
+      // Fails if any CRITICAL or MAJOR alignment/overlap/grid issue exists
+      const structureIssues = issues.filter(i =>
+        ['ALIGNMENT', 'OVERLAP', 'GRID', 'SPACING'].includes(i.type) &&
+        (i.severity === 'CRITICAL' || i.severity === 'MAJOR')
+      );
+      const structurePass = structureIssues.length === 0;
+
+      // Hierarchy: 90% required — redundancy issues indicate hierarchy problems
+      const hierarchyIssues = issues.filter(i =>
+        i.type === 'REDUNDANCY' && (i.severity === 'CRITICAL' || i.severity === 'MAJOR')
+      );
+      const hierarchyPass = hierarchyIssues.length === 0;
+
+      const layerSummary = {
+        accessibility: { pass: accessibilityPass, threshold: '100%', issues: critical.length },
+        structure: { pass: structurePass, threshold: '90%', issues: structureIssues.length },
+        hierarchy: { pass: hierarchyPass, threshold: '90%', issues: hierarchyIssues.length }
+      };
+
+      return { issues, measurements, matchedSelectors, layerSummary };
     }, options.tolerance);
 
     // Output results
@@ -333,8 +355,17 @@ async function checkAlignment() {
     console.log(`ALIGNMENT CHECK RESULTS`);
     console.log(`${'='.repeat(60)}\n`);
 
+    // Matched selectors — transparency on what was actually found
+    console.log(`🔎 MATCHED SELECTORS:\n`);
+    for (const [name, selector] of Object.entries(results.matchedSelectors)) {
+      console.log(`   ${name}: ${selector}`);
+    }
+    if (Object.keys(results.matchedSelectors).length === 0) {
+      console.log(`   (no layout elements matched)`);
+    }
+
     // Measurements
-    console.log(`📐 ELEMENT POSITIONS:\n`);
+    console.log(`\n📐 ELEMENT POSITIONS:\n`);
     for (const [name, info] of Object.entries(results.measurements)) {
       if (info && info.left !== undefined) {
         console.log(`   ${name}:`);
@@ -384,7 +415,18 @@ async function checkAlignment() {
       }
     }
 
-    // Summary
+    // Layer threshold summary
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`LAYER THRESHOLD SUMMARY`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    for (const [layer, info] of Object.entries(results.layerSummary)) {
+      const status = info.pass ? '✅ PASS' : '❌ FAIL';
+      const label = layer.charAt(0).toUpperCase() + layer.slice(1);
+      console.log(`   ${status}  ${label} (threshold: ${info.threshold}) — ${info.issues} blocking issue(s)`);
+    }
+
+    // Overall summary
     console.log(`\n${'='.repeat(60)}`);
     const hasCritical = results.issues.some(i => i.severity === 'CRITICAL');
     const hasMajor = results.issues.some(i => i.severity === 'MAJOR');
@@ -398,9 +440,13 @@ async function checkAlignment() {
     console.log(`${'='.repeat(60)}\n`);
 
     // Output JSON if requested
-    if (options.output) {
-      fs.writeFileSync(options.output, JSON.stringify(results, null, 2));
-      console.log(`📄 Full report saved: ${options.output}`);
+    if (resolvedOutput) {
+      const outputDir = path.dirname(resolvedOutput);
+      if (outputDir && outputDir !== '.') {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+      fs.writeFileSync(resolvedOutput, JSON.stringify(results, null, 2));
+      console.log(`📄 Full report saved: ${resolvedOutput}`);
     }
 
     // Exit with error code if critical issues found

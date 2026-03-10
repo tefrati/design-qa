@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
  * Design QA Accessibility Audit Script
- * 
+ *
  * Runs automated accessibility checks using axe-core.
  * Part of the design QA iteration loop.
- * 
+ *
  * Usage:
  *   node audit-a11y.js --url="http://localhost:3000"
  *   node audit-a11y.js --url="http://localhost:3000" --output="a11y-report.json"
- * 
+ *
  * Options:
  *   --url       Target URL to audit (required)
  *   --output    Output JSON file for detailed results
@@ -18,31 +18,17 @@
 const { chromium } = require('playwright');
 const path = require('path');
 const fs = require('fs');
+const { parseArgs, validateUrl, validateOutput } = require('./lib/parse-args');
 
 async function audit() {
-  // Parse arguments
-  const args = process.argv.slice(2);
-  const options = {
+  const options = parseArgs({
     url: null,
     output: null,
     tags: ['wcag2a', 'wcag2aa']
-  };
+  }, { scriptName: 'audit-a11y.js' });
 
-  for (const arg of args) {
-    if (arg.startsWith('--url=')) {
-      options.url = arg.split('=')[1];
-    } else if (arg.startsWith('--output=')) {
-      options.output = arg.split('=')[1];
-    } else if (arg.startsWith('--tags=')) {
-      options.tags = arg.split('=')[1].split(',');
-    }
-  }
-
-  if (!options.url) {
-    console.error('Error: --url is required');
-    console.error('Usage: node audit-a11y.js --url="http://localhost:3000"');
-    process.exit(1);
-  }
+  validateUrl(options.url, 'audit-a11y.js');
+  const resolvedOutput = validateOutput(options.output);
 
   console.log(`♿ Running accessibility audit...`);
   console.log(`   URL: ${options.url}`);
@@ -59,9 +45,10 @@ async function audit() {
       timeout: 30000
     });
 
-    // Inject axe-core
+    // Inject axe-core from locally-installed package instead of CDN to avoid
+    // network dependency and potential supply-chain risk.
     await page.addScriptTag({
-      url: 'https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.8.3/axe.min.js'
+      path: require.resolve('axe-core')
     });
 
     // Run axe audit
@@ -86,7 +73,7 @@ async function audit() {
 
     if (violations.length > 0) {
       console.log(`\n❌ VIOLATIONS FOUND:\n`);
-      
+
       violations.forEach((violation, index) => {
         const severity = {
           critical: '🔴 CRITICAL',
@@ -99,14 +86,14 @@ async function audit() {
         console.log(`   ${violation.description}`);
         console.log(`   Help: ${violation.helpUrl}`);
         console.log(`   Affected elements: ${violation.nodes.length}`);
-        
+
         violation.nodes.slice(0, 3).forEach(node => {
           console.log(`   - ${node.target.join(' > ')}`);
           if (node.failureSummary) {
             console.log(`     Fix: ${node.failureSummary.split('\n')[0]}`);
           }
         });
-        
+
         if (violation.nodes.length > 3) {
           console.log(`   ... and ${violation.nodes.length - 3} more elements`);
         }
@@ -115,7 +102,7 @@ async function audit() {
     }
 
     // Output JSON if requested
-    if (options.output) {
+    if (resolvedOutput) {
       const report = {
         url: options.url,
         timestamp: new Date().toISOString(),
@@ -138,12 +125,16 @@ async function audit() {
         }))
       };
 
-      fs.writeFileSync(options.output, JSON.stringify(report, null, 2));
-      console.log(`📄 Detailed report saved: ${options.output}`);
+      const outputDir = path.dirname(resolvedOutput);
+      if (outputDir && outputDir !== '.') {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+      fs.writeFileSync(resolvedOutput, JSON.stringify(report, null, 2));
+      console.log(`📄 Detailed report saved: ${resolvedOutput}`);
     }
 
     // Exit with error code if critical/serious violations found
-    const criticalOrSerious = violations.filter(v => 
+    const criticalOrSerious = violations.filter(v =>
       v.impact === 'critical' || v.impact === 'serious'
     );
 

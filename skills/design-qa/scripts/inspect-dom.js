@@ -1,38 +1,28 @@
 #!/usr/bin/env node
 /**
  * Design QA DOM Inspection Script
- * 
+ *
  * Extracts structural information from a page for analysis.
  * Checks typography, spacing, colours, and semantic structure.
- * 
+ *
  * Usage:
  *   node inspect-dom.js --url="http://localhost:3000"
  *   node inspect-dom.js --url="http://localhost:3000" --output="dom-report.json"
  */
 
 const { chromium } = require('playwright');
+const path = require('path');
 const fs = require('fs');
+const { parseArgs, validateUrl, validateOutput } = require('./lib/parse-args');
 
 async function inspect() {
-  // Parse arguments
-  const args = process.argv.slice(2);
-  const options = {
+  const options = parseArgs({
     url: null,
     output: null
-  };
+  }, { scriptName: 'inspect-dom.js' });
 
-  for (const arg of args) {
-    if (arg.startsWith('--url=')) {
-      options.url = arg.split('=')[1];
-    } else if (arg.startsWith('--output=')) {
-      options.output = arg.split('=')[1];
-    }
-  }
-
-  if (!options.url) {
-    console.error('Error: --url is required');
-    process.exit(1);
-  }
+  validateUrl(options.url, 'inspect-dom.js');
+  const resolvedOutput = validateOutput(options.output);
 
   console.log(`🔍 Inspecting DOM structure...`);
   console.log(`   URL: ${options.url}`);
@@ -235,35 +225,41 @@ async function inspect() {
       });
 
       // 8. POSITION MEASUREMENT (for alignment checking)
+      // Use semantic selectors with MkDocs fallbacks
       const positions = {};
-      const measureElement = (selector, name) => {
-        const el = document.querySelector(selector);
-        if (!el) return null;
-        const rect = el.getBoundingClientRect();
-        const computed = getStyle(el);
-        return {
-          name,
-          left: rect.left,
-          right: rect.right,
-          top: rect.top,
-          width: rect.width,
-          height: rect.height,
-          paddingLeft: computed.paddingLeft,
-          paddingRight: computed.paddingRight,
-          marginLeft: computed.marginLeft,
-          visible: rect.width > 0 && rect.height > 0
-        };
+      const measureElement = (selectorList, name) => {
+        for (const selector of selectorList) {
+          const el = document.querySelector(selector);
+          if (!el) continue;
+          const rect = el.getBoundingClientRect();
+          const computed = getStyle(el);
+          if (rect.width > 0 && rect.height > 0) {
+            return {
+              name,
+              left: rect.left,
+              right: rect.right,
+              top: rect.top,
+              width: rect.width,
+              height: rect.height,
+              paddingLeft: computed.paddingLeft,
+              paddingRight: computed.paddingRight,
+              marginLeft: computed.marginLeft,
+              visible: rect.width > 0 && rect.height > 0
+            };
+          }
+        }
+        return null;
       };
 
-      // Measure key layout elements
-      positions.header = measureElement('.md-header__inner', 'header');
-      positions.tabs = measureElement('.md-tabs__inner', 'tabs');
-      positions.tabsFirstItem = measureElement('.md-tabs__item:first-child .md-tabs__link', 'tabsFirstItem');
-      positions.sidebar = measureElement('.md-sidebar--primary', 'sidebar');
-      positions.sidebarInner = measureElement('.md-sidebar--primary .md-sidebar__inner', 'sidebarInner');
-      positions.sidebarFirstLink = measureElement('.md-nav--primary .md-nav__link', 'sidebarFirstLink');
-      positions.content = measureElement('.md-content', 'content');
-      positions.contentInner = measureElement('.md-content__inner', 'contentInner');
+      // Measure key layout elements using fallback chains
+      positions.header = measureElement(['.md-header__inner', 'header', '[role="banner"]'], 'header');
+      positions.tabs = measureElement(['.md-tabs__inner', 'nav', '[role="navigation"]'], 'tabs');
+      positions.tabsFirstItem = measureElement(['.md-tabs__item:first-child .md-tabs__link', 'nav a:first-child'], 'tabsFirstItem');
+      positions.sidebar = measureElement(['.md-sidebar--primary', 'aside', '[role="complementary"]'], 'sidebar');
+      positions.sidebarInner = measureElement(['.md-sidebar--primary .md-sidebar__inner', 'aside > *:first-child'], 'sidebarInner');
+      positions.sidebarFirstLink = measureElement(['.md-nav--primary .md-nav__link', 'aside a:first-of-type'], 'sidebarFirstLink');
+      positions.content = measureElement(['.md-content', 'main', '[role="main"]'], 'content');
+      positions.contentInner = measureElement(['.md-content__inner', 'article', 'main > div:first-child'], 'contentInner');
 
       // Calculate alignment offsets
       const alignmentIssues = [];
@@ -304,10 +300,10 @@ async function inspect() {
         }
       });
 
-      // Check if sidebar only shows current page
-      const sidebarEl = document.querySelector('.md-sidebar--primary');
+      // Check if sidebar only shows current page (MkDocs + generic)
+      const sidebarEl = document.querySelector('.md-sidebar--primary') || document.querySelector('aside');
       if (sidebarEl) {
-        const visibleLinks = [...sidebarEl.querySelectorAll('.md-nav__link')]
+        const visibleLinks = [...sidebarEl.querySelectorAll('.md-nav__link, a')]
           .filter(link => link.offsetWidth > 0 && link.offsetHeight > 0);
         if (visibleLinks.length === 1) {
           const pageTitle = document.querySelector('h1')?.textContent?.trim().toLowerCase();
@@ -317,6 +313,69 @@ async function inspect() {
           }
         }
       }
+
+      // ========== LAYER THRESHOLD SUMMARY ==========
+      const layerSummary = {};
+
+      // Accessibility (100%): contrast issues or missing alt text or missing labels
+      const a11yCritical = contrastIssues.length > 0 || images.withoutAlt.length > 0 || interactive.withoutLabels.length > 0;
+      layerSummary.accessibility = {
+        pass: !a11yCritical,
+        threshold: '100%',
+        findings: {
+          contrastIssues: contrastIssues.length,
+          missingAltText: images.withoutAlt.length,
+          missingLabels: interactive.withoutLabels.length,
+          smallTouchTargets: interactive.smallTouchTargets.length
+        }
+      };
+
+      // Structure (90%): alignment issues, heading skips
+      const structureCritical = alignmentIssues.length > 0 || headingSkips.length > 0;
+      layerSummary.structure = {
+        pass: !structureCritical,
+        threshold: '90%',
+        findings: {
+          alignmentIssues: alignmentIssues.length,
+          headingSkips: headingSkips.length,
+          redundancies: redundancy.duplicateNavItems.length + (redundancy.sidebarShowingOnlyCurrentPage ? 1 : 0)
+        }
+      };
+
+      // Hierarchy (90%): heading structure, H1 count
+      const h1Count = headings.filter(h => h.level === 1).length;
+      const hierarchyCritical = h1Count !== 1 || headingSkips.length > 0;
+      layerSummary.hierarchy = {
+        pass: !hierarchyCritical,
+        threshold: '90%',
+        findings: {
+          h1Count,
+          headingSkips: headingSkips.length,
+          fontCount: typography.fonts.size
+        }
+      };
+
+      // Interaction (85%): touch targets, unlabeled inputs
+      const interactionCritical = interactive.smallTouchTargets.length > 5 || interactive.withoutLabels.length > 0;
+      layerSummary.interaction = {
+        pass: !interactionCritical,
+        threshold: '85%',
+        findings: {
+          smallTouchTargets: interactive.smallTouchTargets.length,
+          missingLabels: interactive.withoutLabels.length
+        }
+      };
+
+      // Emotion (80%): font count, spacing consistency
+      const emotionCritical = typography.fonts.size > 4 || spacingValues.size > 20;
+      layerSummary.emotion = {
+        pass: !emotionCritical,
+        threshold: '80%',
+        findings: {
+          fontCount: typography.fonts.size,
+          spacingVariations: spacingValues.size
+        }
+      };
 
       return {
         typography: {
@@ -349,7 +408,8 @@ async function inspect() {
         images,
         positions,
         alignmentIssues,
-        redundancy
+        redundancy,
+        layerSummary
       };
     });
 
@@ -457,10 +517,30 @@ async function inspect() {
       console.log(`   ✅ No redundancy issues detected`);
     }
 
+    // Layer threshold summary
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`LAYER THRESHOLD SUMMARY`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    for (const [layer, info] of Object.entries(inspection.layerSummary)) {
+      const status = info.pass ? '✅ PASS' : '❌ FAIL';
+      const label = layer.charAt(0).toUpperCase() + layer.slice(1);
+      const details = Object.entries(info.findings)
+        .filter(([, v]) => v > 0)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(', ');
+      console.log(`   ${status}  ${label} (threshold: ${info.threshold})${details ? ' — ' + details : ''}`);
+    }
+    console.log('');
+
     // Output JSON if requested
-    if (options.output) {
-      fs.writeFileSync(options.output, JSON.stringify(inspection, null, 2));
-      console.log(`\n📄 Full report saved: ${options.output}`);
+    if (resolvedOutput) {
+      const outputDir = path.dirname(resolvedOutput);
+      if (outputDir && outputDir !== '.') {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+      fs.writeFileSync(resolvedOutput, JSON.stringify(inspection, null, 2));
+      console.log(`\n📄 Full report saved: ${resolvedOutput}`);
     }
 
   } catch (error) {

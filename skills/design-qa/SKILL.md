@@ -56,15 +56,18 @@ This is the core workflow. Follow it precisely.
 │       │           with severity ratings                          │
 │       │                                                          │
 │       ▼                                                          │
-│  5. CHECK ──► Any issues with severity >= Minor?                 │
+│  5. CHECK ──► Any Critical or Major issues?                      │
 │       │                                                          │
 │       ├── YES ──► 6. FIX highest severity issue                  │
 │       │                 │                                        │
 │       │                 └──► GOTO 1 (new iteration)              │
 │       │                                                          │
 │       └── NO ──► 7. FINAL VALIDATION                             │
-│                       │                                          │
+│                       Report remaining Minor issues              │
 │                       └──► Generate report, DONE                 │
+│                                                                  │
+│  MAX ITERATIONS: Stop after --max-iterations (default: 10)       │
+│                  and report remaining issues as warnings.         │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -75,7 +78,9 @@ This is the core workflow. Follow it precisely.
 - NEVER mark complete without a clean screenshot pass AND clean alignment check
 - ALWAYS re-run alignment-check.js after making CSS/layout changes
 - ALWAYS visually verify fixes worked
-- Loop continues until ZERO issues with severity >= Minor
+- Loop continues until ZERO Critical and ZERO Major issues. Minor issues are reported but do NOT block completion.
+- Use `--strict` flag to re-enable zero-Minor termination for projects that require it.
+- **Maximum iterations**: Default 10 (set with `--max-iterations=N`). When the cap is hit, the loop exits with a **WARNING: Max iterations reached** message listing all unresolved issues. This prevents runaway loops.
 - **If alignment-check.js reports CRITICAL issues, they MUST be fixed before proceeding**
 
 ---
@@ -257,24 +262,70 @@ node scripts/capture.js --url="http://localhost:3000" --output="screenshots/iter
 
 ## Phase 6: Loop Termination Criteria
 
-The loop ONLY terminates when ALL of the following are true:
+### Default mode (no flags)
+
+The loop terminates when ALL of the following are true:
 
 ```
 [ ] Screenshot shows ZERO Critical issues
 [ ] Screenshot shows ZERO Major issues
-[ ] Screenshot shows ZERO Minor issues
 [ ] alignment-check.js reports ZERO Critical issues
 [ ] alignment-check.js reports ZERO Major issues
-[ ] Visual analysis confirms all layers pass thresholds
+[ ] alignment-check.js LAYER THRESHOLD SUMMARY shows all layers PASS
+[ ] inspect-dom.js LAYER THRESHOLD SUMMARY shows all layers PASS
 [ ] DOM inspection confirms no accessibility violations
 [ ] Code analysis confirms no regressions
+[ ] Iteration count ≤ --max-iterations (default: 10)
 ```
 
-**If ANY of the above fail, CONTINUE THE LOOP.**
+Minor issues are **reported in the final report** but do NOT block completion.
+
+### Strict mode (`--strict`)
+
+When invoked with `--strict`, the loop additionally requires:
+
+```
+[ ] Screenshot shows ZERO Minor issues
+```
+
+Use `--strict` for projects that demand pixel-perfect polish on every detail.
+
+### Max iterations
+
+The loop MUST NOT exceed `--max-iterations` (default: 10). When the cap is reached:
+
+```
+⚠️  WARNING: Max iterations reached (10/10).
+    The following issues remain unresolved:
+    - [list of remaining Critical/Major/Minor issues]
+    Manual review is required to continue.
+```
+
+The loop exits and produces the Design QA Report with the current state. This prevents infinite iteration loops.
+
+**If ANY of the above fail (except Minor in default mode), CONTINUE THE LOOP.**
 
 ### Alignment Check Must Pass
 
 **CRITICAL:** The alignment-check.js script MUST report "PASS" before the loop can terminate. Do not rely solely on visual inspection of screenshots—pixel-level measurement is the source of truth for alignment issues.
+
+### Layer Threshold Checks
+
+Both `alignment-check.js` and `inspect-dom.js` now output a **LAYER THRESHOLD SUMMARY** section that maps findings to the five analysis layers and prints PASS/FAIL per layer:
+
+```
+============================================================
+LAYER THRESHOLD SUMMARY
+============================================================
+
+   ✅ PASS  Accessibility (threshold: 100%)
+   ❌ FAIL  Structure (threshold: 90%) — alignmentIssues: 2
+   ✅ PASS  Hierarchy (threshold: 90%)
+   ✅ PASS  Interaction (threshold: 85%)
+   ✅ PASS  Emotion (threshold: 80%)
+```
+
+Use this output to make a **deterministic decision** about whether to continue the loop. If any layer shows FAIL, the loop must continue (unless only Minor issues remain in default mode).
 
 ---
 
@@ -392,6 +443,12 @@ When loop termination criteria met:
 
 # Start QA on deployed preview
 /design-qa https://preview.myapp.com
+
+# Strict mode — also requires zero Minor issues before completion
+/design-qa http://localhost:3000 --strict
+
+# Limit iterations (default: 10)
+/design-qa http://localhost:3000 --max-iterations=5
 ```
 
 ---
