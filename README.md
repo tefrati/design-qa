@@ -36,7 +36,7 @@ claude plugin install https://github.com/tefrati/design-qa
 **Dependencies** (in your project):
 
 ```bash
-npm install -D playwright
+npm install -D playwright axe-core
 npx playwright install chromium
 ```
 
@@ -141,7 +141,7 @@ Offset:                16px  ← CRITICAL, invisible in screenshot
 
 - Claude Code
 - Node.js 18+
-- Playwright (`npm install -D playwright && npx playwright install chromium`)
+- Playwright (`npm install -D playwright axe-core && npx playwright install chromium`)
 - A running dev server
 
 ---

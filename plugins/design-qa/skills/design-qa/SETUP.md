@@ -9,7 +9,7 @@
 unzip design-qa.zip -d ~/.claude/skills/
 
 # 2. Install dependencies (in any project where you'll use it)
-npm install -D playwright
+npm install -D playwright axe-core
 npx playwright install chromium
 ```
 
@@ -21,7 +21,7 @@ mkdir -p .claude/skills
 unzip design-qa.zip -d .claude/skills/
 
 # 2. Install dependencies
-npm install -D playwright
+npm install -D playwright axe-core
 npx playwright install chromium
 ```
 
@@ -57,5 +57,5 @@ Or just ask Claude naturally:
 ## Requirements
 
 - Node.js 18+
-- Playwright (`npm install -D playwright`)
+- Playwright (`npm install -D playwright axe-core`)
 - A running dev server for your project
