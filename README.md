@@ -30,7 +30,7 @@ Captures screenshots. Measures pixels. Analyses against Rams, Nielsen, and WCAG.
 ## Install
 
 ```bash
-claude plugin install https://github.com/p-slatts/design-qa
+claude plugin install https://github.com/tefrati/design-qa
 ```
 
 **Dependencies** (in your project):
