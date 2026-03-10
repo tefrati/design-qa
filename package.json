@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "A Claude Code plugin for autonomous design QA — captures screenshots, measures alignment, inspects DOM structure, and audits accessibility.",
   "license": "MIT",
-  "author": "Paul Slattery",
+  "author": "Tzahi Efrati",
   "scripts": {
     "qa:capture": "node skills/design-qa/scripts/capture.js",
     "qa:align": "node skills/design-qa/scripts/alignment-check.js",
