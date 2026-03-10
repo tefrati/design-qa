@@ -1,26 +1,18 @@
 # Design QA Skill - Setup Instructions
 
-## Quick Install for Claude Code
-
-### Personal Installation (all projects)
+## Install
 
 ```bash
-# 1. Unzip to personal skills directory
-unzip design-qa.zip -d ~/.claude/skills/
+# 1. Add the marketplace (one-time)
+/plugin marketplace add tefrati/design-qa
 
-# 2. Install dependencies (in any project where you'll use it)
-npm install -D playwright axe-core
-npx playwright install chromium
+# 2. Install the plugin
+/plugin install design-qa
 ```
 
-### Project Installation (single project)
+### Dependencies (in each project where you use it)
 
 ```bash
-# 1. From your project root
-mkdir -p .claude/skills
-unzip design-qa.zip -d .claude/skills/
-
-# 2. Install dependencies
 npm install -D playwright axe-core
 npx playwright install chromium
 ```

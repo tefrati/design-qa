@@ -30,10 +30,14 @@ Captures screenshots. Measures pixels. Analyses against Rams, Nielsen, and WCAG.
 ## Install
 
 ```bash
-claude plugin install https://github.com/tefrati/design-qa
+# 1. Add the marketplace (one-time)
+/plugin marketplace add tefrati/design-qa
+
+# 2. Install the plugin
+/plugin install design-qa
 ```
 
-**Dependencies** (in your project):
+**Dependencies** (in each project where you use it):
 
 ```bash
 npm install -D playwright axe-core
